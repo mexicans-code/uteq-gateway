@@ -12,6 +12,10 @@ app.use(express.json());
 const destinosHandler = require('./api/destinos');
 const eventosHandler = require('./api/events');
 const mostVisitedHandler = require('./api/most-visited');
+const authHandler = require('./api/auth');
+const usersHandler = require('./api/users');
+const historialHandler = require('./api/historial');
+const routesHandler = require('./api/routes');
 
 
 function adaptHandler(handler) {
@@ -29,6 +33,10 @@ function adaptHandler(handler) {
 app.use('/api/destinos', adaptHandler(destinosHandler));
 app.use('/api/events', adaptHandler(eventosHandler));
 app.use('/api/most-visited', adaptHandler(mostVisitedHandler));
+app.use('/api/auth', adaptHandler(authHandler));
+app.use('/api/users', adaptHandler(usersHandler));
+app.use('/api/historial', adaptHandler(historialHandler));
+app.use('/api/routes', adaptHandler(routesHandler));
 
 app.get('/', (req, res) => {
   res.json({ 
