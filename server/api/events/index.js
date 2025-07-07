@@ -1,30 +1,23 @@
-// server.js - Servidor local para API de eventos (Corregido)
-const express = require('express');
-const cors = require('cors');
 const { MongoClient, ObjectId } = require('mongodb');
-const path = require('path');
-require('dotenv').config();
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Middleware
-app.use(cors());
-app.use(express.json());
-
-// Configuración de MongoDB
-const uri = process.env.MONGO_URI || 'mongodb+srv://2023171035:UJfzTuvjiwG4HYKG@cluster0.ugps9.mongodb.net/NovaCode';
-const dbName = process.env.DB_NAME || 'NovaCode';
+const MONGO_URI = process.env.MONGO_URI;
+const DB_NAME = process.env.DB_NAME || 'NovaCode';
 
 let cachedClient = null;
 let cachedDb = null;
 
 async function connectToDatabase() {
-  if (cachedDb) return cachedDb;
+  if (cachedDb) {
+    return cachedDb;
+  }
   
   try {
+    if (!MONGO_URI) {
+      throw new Error('MONGO_URI no está configurado');
+    }
+    
     console.log('🔄 Conectando a MongoDB...');
-    const client = new MongoClient(uri, {
+    const client = new MongoClient(MONGO_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
       serverSelectionTimeoutMS: 5000,
@@ -34,7 +27,7 @@ async function connectToDatabase() {
     await client.connect();
     console.log('✅ Conectado a MongoDB');
     
-    const db = client.db(dbName);
+    const db = client.db(DB_NAME);
     
     // Verificar conexión
     await db.admin().ping();
@@ -49,360 +42,451 @@ async function connectToDatabase() {
   }
 }
 
-// GET /api/events - Obtener todos los eventos
-app.get('/api/events', async (req, res) => {
+// Función para extraer ID de la URL
+function extractIdFromUrl(url) {
+  console.log('🔍 URL original:', url);
+  
+  // Remover query parameters
+  const urlWithoutQuery = url.split('?')[0];
+  console.log('🔍 URL sin query:', urlWithoutQuery);
+  
+  // Separar por '/' y filtrar partes vacías
+  const parts = urlWithoutQuery.split('/').filter(part => part !== '');
+  console.log('🔍 Partes de la URL:', parts);
+  
+  // Buscar el patrón /api/events/:id
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i] === 'events' && parts[i + 1]) {
+      const id = parts[i + 1];
+      console.log('🔍 ID encontrado (patrón api/events):', id);
+      return { id, isStatusUpdate: false };
+    }
+  }
+  
+  // Si no se encuentra el patrón anterior, asumir que la URL es directa
+  // Casos: /:id
+  if (parts.length >= 1) {
+    const id = parts[0];
+    console.log('🔍 ID encontrado (patrón directo):', id);
+    return { id, isStatusUpdate: false };
+  }
+  
+  console.log('🔍 No se pudo extraer ID de la URL');
+  return { id: null, isStatusUpdate: false };
+}
+
+async function handler(req, res) {
+  // Configurar CORS
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   try {
-    console.log('🔍 Obteniendo eventos...');
-    const db = await connectToDatabase();
-    const eventsCollection = db.collection('events');
+    console.log(`📊 ${req.method} ${req.url}`);
     
-    // Verificar que la colección existe
-    const collections = await db.listCollections({name: 'events'}).toArray();
-    if (collections.length === 0) {
-      console.log('⚠️  La colección "events" no existe');
+    // Ruta de prueba simple
+    if (req.query.test === 'simple') {
+      return res.status(200).json({
+        message: 'API eventos funcionando sin DB',
+        timestamp: new Date().toISOString(),
+        success: true
+      });
+    }
+
+    // Ruta de diagnóstico
+    if (req.query.diagnostico === 'true') {
+      const db = await connectToDatabase();
+      
+      const collections = await db.listCollections().toArray();
+      console.log('📊 Colecciones disponibles:', collections.map(c => c.name));
+      
+      const eventsCollection = db.collection('events');
+      const count = await eventsCollection.countDocuments();
+      console.log(`🎉 Documentos en colección 'events': ${count}`);
+      
+      const samples = await eventsCollection.find().limit(3).toArray();
+      console.log('📋 Documentos de muestra:', samples);
+      
       return res.json({
         success: true,
-        count: 0,
-        data: [],
-        message: 'La colección "events" no existe aún'
-      });
-    }
-    
-    const events = await eventsCollection.find().sort({ id: 1 }).toArray();
-    const count = events.length;
-    
-    console.log(`✅ Encontrados ${count} eventos`);
-    
-    res.json({
-      success: true,
-      count,
-      data: events
-    });
-  } catch (error) {
-    console.error('❌ Error al obtener eventos:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error del servidor',
-      error: error.message
-    });
-  }
-});
-
-// POST /api/events - Crear nuevo evento
-app.post('/api/events', async (req, res) => {
-  try {
-    console.log('📝 Creando nuevo evento:', req.body);
-    const { id, nombre, fecha, lugar, imagen, posicion } = req.body;
-    
-    // Validaciones
-    if (!id || !nombre || !fecha || !lugar) {
-      return res.status(400).json({
-        success: false,
-        message: 'Todos los campos son requeridos (id, nombre, fecha, lugar, imagen, posicion.latitude, posicion.longitude)'
+        diagnostico: {
+          conexion: 'OK',
+          baseDatos: DB_NAME,
+          colecciones: collections.map(c => c.name),
+          eventsCount: count,
+          muestras: samples
+        }
       });
     }
 
-    if (!posicion || !posicion.latitude || !posicion.longitude) {
-      return res.status(400).json({
-        success: false,
-        message: 'Las coordenadas de posición son requeridas'
-      });
-    }
-
+    // Conectar a la base de datos
     const db = await connectToDatabase();
     const eventsCollection = db.collection('events');
 
-    // Verificar que el ID no exista
-    const existingEvent = await eventsCollection.findOne({ id: id.toString() });
-    if (existingEvent) {
-      return res.status(400).json({
-        success: false,
-        message: 'Ya existe un evento con este ID'
-      });
-    }
-
-    // Validar coordenadas
-    const lat = parseFloat(posicion.latitude);
-    const lng = parseFloat(posicion.longitude);
-
-    if (isNaN(lat) || isNaN(lng)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Las coordenadas deben ser números válidos'
-      });
-    }
-
-    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      return res.status(400).json({
-        success: false,
-        message: 'Coordenadas fuera de rango válido'
-      });
-    }
-
-    const nuevoEvento = {
-      id: id.toString(),
-      nombre: nombre.trim(),
-      posicion: {
-        latitude: lat,
-        longitude: lng
-      },
-      fecha: fecha,
-      lugar: lugar.trim(),
-      imagen: imagen || '',
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-
-    const result = await eventsCollection.insertOne(nuevoEvento);
-    console.log('✅ Evento creado:', result.insertedId);
+    // Extraer ID de la URL
+    const { id: eventId } = extractIdFromUrl(req.url);
     
-    res.status(201).json({
-      success: true,
-      message: 'Evento creado correctamente',
-      data: {
-        _id: result.insertedId,
-        ...nuevoEvento
+    console.log('🔍 ID extraído:', eventId);
+
+    // ===========================================
+    // GET REQUESTS
+    // ===========================================
+    if (req.method === 'GET') {
+      if (eventId) {
+        // GET /api/events/:id - Obtener evento específico
+        console.log(`🔍 Buscando evento con ID: ${eventId}`);
+        
+        let evento;
+        
+        // Intentar buscar por ObjectId si es válido
+        if (ObjectId.isValid(eventId)) {
+          evento = await eventsCollection.findOne({ _id: new ObjectId(eventId) });
+          console.log('🔍 Búsqueda por ObjectId:', evento ? 'encontrado' : 'no encontrado');
+        }
+        
+        // Si no se encontró, buscar por ID personalizado
+        if (!evento) {
+          evento = await eventsCollection.findOne({ id: eventId.toString() });
+          console.log('🔍 Búsqueda por ID personalizado:', evento ? 'encontrado' : 'no encontrado');
+        }
+
+        if (!evento) {
+          return res.status(404).json({
+            success: false,
+            message: 'Evento no encontrado',
+            debug: {
+              searchedId: eventId,
+              isValidObjectId: ObjectId.isValid(eventId)
+            }
+          });
+        }
+
+        console.log('✅ Evento encontrado:', evento.nombre);
+        return res.json({
+          success: true,
+          data: evento
+        });
+      } else {
+        // GET /api/events - Obtener todos los eventos
+        console.log('🔍 Obteniendo todos los eventos...');
+        
+        try {
+          const events = await eventsCollection.find().sort({ id: 1 }).toArray();
+          const count = events.length;
+          
+          console.log(`✅ Encontrados ${count} eventos`);
+          
+          return res.json({
+            success: true,
+            count,
+            data: events
+          });
+        } catch (dbError) {
+          console.log('⚠️ Error al obtener eventos:', dbError.message);
+          return res.json({
+            success: true,
+            count: 0,
+            data: [],
+            message: 'La colección "events" no existe aún'
+          });
+        }
+      }
+    }
+
+    // ===========================================
+    // POST REQUESTS
+    // ===========================================
+    else if (req.method === 'POST') {
+      console.log('📝 Creando nuevo evento:', req.body);
+      
+      if (!req.body) {
+        return res.status(400).json({
+          success: false,
+          message: 'Datos requeridos en el cuerpo de la petición'
+        });
+      }
+      
+      const { id, nombre, fecha, lugar, imagen, posicion } = req.body;
+      
+      // Validaciones básicas
+      if (!id || !nombre || !fecha || !lugar) {
+        return res.status(400).json({
+          success: false,
+          message: 'Los campos id, nombre, fecha y lugar son requeridos'
+        });
+      }
+
+      if (!posicion || !posicion.latitude || !posicion.longitude) {
+        return res.status(400).json({
+          success: false,
+          message: 'Las coordenadas de posición son requeridas'
+        });
+      }
+
+      // Validar coordenadas
+      const lat = parseFloat(posicion.latitude);
+      const lng = parseFloat(posicion.longitude);
+
+      if (isNaN(lat) || isNaN(lng)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Las coordenadas deben ser números válidos'
+        });
+      }
+
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return res.status(400).json({
+          success: false,
+          message: 'Coordenadas fuera de rango válido'
+        });
+      }
+
+      // Verificar duplicados
+      const existingEvent = await eventsCollection.findOne({ id: id.toString() });
+      if (existingEvent) {
+        return res.status(400).json({
+          success: false,
+          message: 'Ya existe un evento con este ID'
+        });
+      }
+
+      const nuevoEvento = {
+        id: id.toString(),
+        nombre: nombre.trim(),
+        posicion: {
+          latitude: lat,
+          longitude: lng
+        },
+        fecha: fecha,
+        lugar: lugar.trim(),
+        imagen: imagen || '',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+
+      const result = await eventsCollection.insertOne(nuevoEvento);
+      console.log('✅ Evento creado con ID:', result.insertedId);
+      
+      return res.status(201).json({
+        success: true,
+        message: 'Evento creado correctamente',
+        data: {
+          _id: result.insertedId,
+          ...nuevoEvento
+        }
+      });
+    }
+
+    // ===========================================
+    // PUT REQUESTS
+    // ===========================================
+    else if (req.method === 'PUT') {
+      if (!eventId) {
+        return res.status(400).json({
+          success: false,
+          message: 'ID de evento requerido para actualizar',
+          debug: {
+            url: req.url,
+            extractedId: eventId
+          }
+        });
+      }
+
+      if (!req.body) {
+        return res.status(400).json({
+          success: false,
+          message: 'Datos requeridos en el cuerpo de la petición'
+        });
+      }
+
+      const { nombre, fecha, lugar, imagen, posicion } = req.body;
+      
+      console.log(`📝 Actualizando evento ID: ${eventId}`);
+      
+      // Validaciones básicas
+      if (!nombre || !lugar) {
+        return res.status(400).json({
+          success: false,
+          message: 'Los campos nombre y lugar son requeridos'
+        });
+      }
+
+      if (!posicion || !posicion.latitude || !posicion.longitude) {
+        return res.status(400).json({
+          success: false,
+          message: 'Las coordenadas de posición son requeridas'
+        });
+      }
+
+      // Validar coordenadas
+      const lat = parseFloat(posicion.latitude);
+      const lng = parseFloat(posicion.longitude);
+
+      if (isNaN(lat) || isNaN(lng)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Las coordenadas deben ser números válidos'
+        });
+      }
+
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return res.status(400).json({
+          success: false,
+          message: 'Coordenadas fuera de rango válido'
+        });
+      }
+
+      const updateData = {
+        nombre: nombre.trim(),
+        posicion: {
+          latitude: lat,
+          longitude: lng
+        },
+        lugar: lugar.trim(),
+        imagen: imagen || '',
+        updatedAt: new Date()
+      };
+
+      // Incluir fecha si se proporciona
+      if (fecha) {
+        updateData.fecha = fecha;
+      }
+
+      let result;
+      
+      // Intentar actualizar por ObjectId si es válido
+      if (ObjectId.isValid(eventId)) {
+        result = await eventsCollection.updateOne(
+          { _id: new ObjectId(eventId) },
+          { $set: updateData }
+        );
+        console.log('🔄 Actualización por ObjectId:', result.matchedCount, 'coincidencias');
+      }
+      
+      // Si no se actualizó, intentar por ID personalizado
+      if (!result || result.matchedCount === 0) {
+        result = await eventsCollection.updateOne(
+          { id: eventId.toString() },
+          { $set: updateData }
+        );
+        console.log('🔄 Actualización por ID personalizado:', result.matchedCount, 'coincidencias');
+      }
+
+      if (result.matchedCount === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Evento no encontrado para actualizar',
+          debug: {
+            searchedId: eventId,
+            isValidObjectId: ObjectId.isValid(eventId)
+          }
+        });
+      }
+
+      console.log('✅ Evento actualizado:', result.modifiedCount, 'registros modificados');
+      
+      // Obtener el evento actualizado
+      let eventoActualizado;
+      if (ObjectId.isValid(eventId)) {
+        eventoActualizado = await eventsCollection.findOne({ _id: new ObjectId(eventId) });
+      } else {
+        eventoActualizado = await eventsCollection.findOne({ id: eventId.toString() });
+      }
+
+      return res.json({
+        success: true,
+        message: 'Evento actualizado correctamente',
+        data: eventoActualizado
+      });
+    }
+
+    // ===========================================
+    // DELETE REQUESTS
+    // ===========================================
+    else if (req.method === 'DELETE') {
+      if (!eventId) {
+        return res.status(400).json({
+          success: false,
+          message: 'ID de evento requerido para eliminar',
+          debug: {
+            url: req.url,
+            extractedId: eventId
+          }
+        });
+      }
+
+      console.log(`🗑️ Eliminando evento ID: ${eventId}`);
+      
+      let result;
+      
+      // Intentar eliminar por ObjectId si es válido
+      if (ObjectId.isValid(eventId)) {
+        result = await eventsCollection.deleteOne({ _id: new ObjectId(eventId) });
+        console.log('🗑️ Eliminación por ObjectId:', result.deletedCount, 'registros eliminados');
+      }
+      
+      // Si no se eliminó, intentar por ID personalizado
+      if (!result || result.deletedCount === 0) {
+        result = await eventsCollection.deleteOne({ id: eventId.toString() });
+        console.log('🗑️ Eliminación por ID personalizado:', result.deletedCount, 'registros eliminados');
+      }
+
+      if (result.deletedCount === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Evento no encontrado para eliminar',
+          debug: {
+            searchedId: eventId,
+            isValidObjectId: ObjectId.isValid(eventId)
+          }
+        });
+      }
+
+      console.log('✅ Evento eliminado:', result.deletedCount, 'registros');
+      
+      return res.json({
+        success: true,
+        message: 'Evento eliminado correctamente'
+      });
+    }
+
+    else {
+      return res.status(405).json({
+        success: false,
+        message: 'Método no permitido',
+        allowedMethods: ['GET', 'POST', 'PUT', 'DELETE']
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Error en handler:', error);
+    console.error('❌ Stack trace:', error.stack);
+    
+    return res.status(500).json({
+      success: false,
+      message: 'Error interno del servidor',
+      error: error.message,
+      debug: {
+        method: req.method,
+        url: req.url,
+        timestamp: new Date().toISOString()
       }
     });
-  } catch (error) {
-    console.error('❌ Error al crear evento:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error del servidor',
-      error: error.message
-    });
   }
-});
+}
 
-// GET /api/events/:id - Obtener evento por ID
-app.get('/api/events/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    console.log(`🔍 Buscando evento con ID: ${id}`);
-    
-    const db = await connectToDatabase();
-    const eventsCollection = db.collection('events');
-
-    let evento;
-    if (ObjectId.isValid(id)) {
-      evento = await eventsCollection.findOne({ _id: new ObjectId(id) });
-    } else {
-      evento = await eventsCollection.findOne({ id: id.toString() });
-    }
-
-    if (!evento) {
-      return res.status(404).json({
-        success: false,
-        message: 'Evento no encontrado'
-      });
-    }
-
-    console.log('✅ Evento encontrado:', evento);
-    res.json({
-      success: true,
-      data: evento
-    });
-  } catch (error) {
-    console.error('❌ Error al obtener evento:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error del servidor',
-      error: error.message
-    });
-  }
-});
-
-// PUT /api/events/:id - Actualizar evento
-app.put('/api/events/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { nombre, fecha, lugar, imagen, posicion } = req.body;
-    
-    console.log(`📝 Actualizando evento ID: ${id}`, req.body);
-    
-    if (!nombre || !lugar || !posicion || !posicion.latitude || !posicion.longitude) {
-      return res.status(400).json({
-        success: false,
-        message: 'Todos los campos son requeridos (nombre, lugar, imagen, posicion.latitude, posicion.longitude)'
-      });
-    }
-
-    // Validar coordenadas
-    const lat = parseFloat(posicion.latitude);
-    const lng = parseFloat(posicion.longitude);
-
-    if (isNaN(lat) || isNaN(lng)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Las coordenadas deben ser números válidos'
-      });
-    }
-
-    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      return res.status(400).json({
-        success: false,
-        message: 'Coordenadas fuera de rango válido'
-      });
-    }
-
-    const db = await connectToDatabase();
-    const eventsCollection = db.collection('events');
-
-    const updateData = {
-      nombre: nombre.trim(),
-      posicion: {
-        latitude: lat,
-        longitude: lng
-      },
-      lugar: lugar.trim(),
-      imagen: imagen || '',
-      updatedAt: new Date()
-    };
-
-    // Incluir fecha si se proporciona
-    if (fecha) {
-      updateData.fecha = fecha;
-    }
-
-    let updateResult;
-    if (ObjectId.isValid(id)) {
-      updateResult = await eventsCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: updateData }
-      );
-    } else {
-      updateResult = await eventsCollection.updateOne(
-        { id: id.toString() },
-        { $set: updateData }
-      );
-    }
-
-    if (updateResult.matchedCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Evento no encontrado'
-      });
-    }
-
-    console.log('✅ Evento actualizado');
-    res.json({
-      success: true,
-      message: 'Evento actualizado correctamente'
-    });
-  } catch (error) {
-    console.error('❌ Error al actualizar evento:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error del servidor',
-      error: error.message
-    });
-  }
-});
-
-// DELETE /api/events/:id - Eliminar evento
-app.delete('/api/events/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    console.log(`🗑️  Eliminando evento ID: ${id}`);
-    
-    const db = await connectToDatabase();
-    const eventsCollection = db.collection('events');
-
-    let deleteResult;
-    if (ObjectId.isValid(id)) {
-      deleteResult = await eventsCollection.deleteOne({ _id: new ObjectId(id) });
-    } else {
-      deleteResult = await eventsCollection.deleteOne({ id: id.toString() });
-    }
-
-    if (deleteResult.deletedCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Evento no encontrado'
-      });
-    }
-
-    console.log('✅ Evento eliminado');
-    res.json({
-      success: true,
-      message: 'Evento eliminado correctamente'
-    });
-  } catch (error) {
-    console.error('❌ Error al eliminar evento:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error del servidor',
-      error: error.message
-    });
-  }
-});
-
-// Ruta de prueba
-app.get('/api/test', (req, res) => {
-  res.json({
-    success: true,
-    message: 'API funcionando correctamente',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Ruta de diagnóstico
-app.get('/api/diagnostico', async (req, res) => {
-  try {
-    const db = await connectToDatabase();
-    const collections = await db.listCollections().toArray();
-    const eventsCollection = db.collection('events');
-    const eventCount = await eventsCollection.countDocuments();
-    
-    res.json({
-      success: true,
-      database: dbName,
-      collections: collections.map(col => col.name),
-      eventCount,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Inicializar servidor
-app.listen(PORT, async () => {
-  console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
-  console.log(`📡 API disponible en http://localhost:${PORT}/api`);
-  console.log(`🧪 Prueba la API en http://localhost:${PORT}/api/test`);
-  console.log(`🔍 Diagnóstico en http://localhost:${PORT}/api/diagnostico`);
-  console.log(`🌱 Crear datos de prueba: POST http://localhost:${PORT}/api/events/`);
-  
-  // Intentar conectar a la base de datos al iniciar
-  try {
-    await connectToDatabase();
-    console.log('✅ Conexión inicial a MongoDB exitosa');
-  } catch (error) {
-    console.error('❌ Error en conexión inicial:', error);
-  }
-});
-
-// Manejo de errores del servidor
-process.on('unhandledRejection', (err) => {
-  console.error('❌ Unhandled Promise Rejection:', err);
-  process.exit(1);
-});
-
-process.on('uncaughtException', (err) => {
-  console.error('❌ Uncaught Exception:', err);
-  process.exit(1);
-});
-
-// Cerrar conexión al terminar el proceso
+// Manejar cierre de conexión
 process.on('SIGINT', async () => {
-  console.log('🛑 Cerrando servidor...');
+  console.log('🔄 Cerrando conexión a MongoDB...');
   if (cachedClient) {
     await cachedClient.close();
-    console.log('✅ Conexión a MongoDB cerrada');
+    console.log('✅ Conexión cerrada');
   }
   process.exit(0);
 });
+
+module.exports = handler;

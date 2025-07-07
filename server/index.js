@@ -1,7 +1,9 @@
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
-
+console.log('🔍 Variables de entorno cargadas:');
+console.log('MONGO_URI:', process.env.MONGO_URI ? 'Configurado' : 'NO CONFIGURADO');
+console.log('DB_NAME:', process.env.DB_NAME);
 
 
 const app = express();
@@ -16,6 +18,8 @@ const registerHandler = require('./api/auth/register');
 const loginHandler = require('./api/auth/login');
 const usersHandler = require('./api/usersAll');
 const historialHandler = require('./api/historial');
+
+const personalHandler = require('./api/personal');
 
 
 function adaptHandler(handler) {
@@ -36,8 +40,13 @@ app.use('/api/most-visited', adaptHandler(mostVisitedHandler));
 app.use('/api/users', adaptHandler(usersHandler));
 app.use('/api/historial', adaptHandler(historialHandler));
 
+
 app.use('/api/auth/register', adaptHandler(registerHandler));
 app.use('/api/auth/login', adaptHandler(loginHandler));
+
+app.use('/api/personal', adaptHandler(personalHandler));
+
+
 
 app.get('/', (req, res) => {
   res.json({ 
