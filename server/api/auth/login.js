@@ -119,7 +119,8 @@ module.exports = async (req, res) => {
         origen: user.origen,
         estatus: user.estatus,
         fechaCreacion: user.fechaCreacion,
-        ultimoLogin: new Date()
+        ultimoLogin: new Date(),
+        tipo: user.tipo
       }
     });
 

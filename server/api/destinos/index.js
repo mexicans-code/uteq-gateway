@@ -369,6 +369,7 @@ async function handler(req, res) {
       }
 
       console.log('✅ Destino eliminado');
+      
       return res.json({
         success: true,
         message: 'Destino eliminado correctamente'
