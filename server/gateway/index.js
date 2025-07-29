@@ -11,9 +11,11 @@ const services = {
     'most-visited': 'http://localhost:3004',
     'auth' : 'http://localhost:3005',
     'users' : 'http://localhost:3006',
-    'destinos' : 'http://localhost:3007',
-    'historial' : 'http://localhost:3008',
-    'routes' : 'http://localhost:3009'
+    'personal' : 'http://localhost:3007',
+    'destinos' : 'http://localhost:3008',
+    'historial' : 'http://localhost:3009',
+    'routes' : 'http://localhost:3010',
+    'report' : 'http://localhost:3011'
 
   };
 app.use(cors());
@@ -127,6 +129,19 @@ app.use('/users', (req, res, next) => {
     })(req, res, next);
   });
 
+  app.use('/report', (req, res, next) => {
+    console.log('Intercepting /report request');
+    createProxyMiddleware({
+      target: `${services.report}/api/report`,
+      changeOrigin: true,
+      logLevel: 'debug',
+      onError: (err, req, res) => {
+        console.error('Proxy error:', err);
+        res.status(502).json({ error: 'Bad Gateway' });
+      }
+    })(req, res, next);
+  });
+
 
 
 
@@ -140,4 +155,5 @@ app.listen(PORT, () => {
   console.log(`🔗 Destinos endpoint: http://localhost:${PORT}/destinos`);
   console.log(`🔗 Historial endpoint: http://localhost:${PORT}/historial`);
   console.log(`🔗 Routes endpoint: http://localhost:${PORT}/routes`);
+  console.log(`🔗 Report endpoint: http://localhost:${PORT}/report`);
 });
